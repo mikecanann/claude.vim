@@ -93,10 +93,11 @@ endif
 # ============================================================================
 
 def ClaudeQueryInternal(messages: list<any>, system_prompt: string, tools: list<any>, StreamCallback: func, FinalCallback: func): any
-  # Prepare the API request
-  var data = {}
-  var headers: list<any> = []
-  var url = ''
+  try
+    # Prepare the API request
+    var data = {}
+    var headers: list<any> = []
+    var url = ''
 
   if g:claude_use_bedrock
     var python_script = plugin_dir .. '/claude_bedrock_helper.py'
@@ -138,22 +139,28 @@ def ClaudeQueryInternal(messages: list<any>, system_prompt: string, tools: list<
     extend(cmd, ['-d', json_data, url])
   endif
 
-  # Start the job
-  if has('nvim')
-    var job = jobstart(cmd, {
-      on_stdout: function(HandleStreamOutputNvim, [StreamCallback, FinalCallback]),
-      on_stderr: function(HandleJobErrorNvim, [StreamCallback, FinalCallback]),
-      on_exit: function(HandleJobExitNvim, [StreamCallback, FinalCallback])
-      })
-  else
-    var job = job_start(cmd, {
-      out_cb: function(HandleStreamOutput, [StreamCallback, FinalCallback]),
-      err_cb: function(HandleJobError, [StreamCallback, FinalCallback]),
-      exit_cb: function(HandleJobExit, [StreamCallback, FinalCallback])
-      })
-  endif
+    # Start the job
+    if has('nvim')
+      var job = jobstart(cmd, {
+        on_stdout: function(HandleStreamOutputNvim, [StreamCallback, FinalCallback]),
+        on_stderr: function(HandleJobErrorNvim, [StreamCallback, FinalCallback]),
+        on_exit: function(HandleJobExitNvim, [StreamCallback, FinalCallback])
+        })
+    else
+      var job = job_start(cmd, {
+        out_cb: function(HandleStreamOutput, [StreamCallback, FinalCallback]),
+        err_cb: function(HandleJobError, [StreamCallback, FinalCallback]),
+        exit_cb: function(HandleJobExit, [StreamCallback, FinalCallback])
+        })
+    endif
 
-  return job
+    return job
+  catch
+    echohl ErrorMsg
+    echomsg "FATAL ERROR in ClaudeQueryInternal: " .. v:exception .. " at " .. v:throwpoint
+    echohl None
+    return -1
+  endtry
 enddef
 
 var stored_input_tokens: number
@@ -580,21 +587,35 @@ var implement_response: string
 
 # Function to implement code based on instructions
 def ClaudeImplement(line1: number, line2: number, instruction: string)
-  # Get the selected code
-  var selected_code = join(getline(line1, line2), "\n")
-  var bufnr = bufnr('%')
-  var bufname = bufname('%')
-  var winid = win_getid()
+  try
+    # Validate instruction is not empty
+    if empty(trim(instruction))
+      echohl ErrorMsg
+      echomsg "Error: ClaudeImplement requires an instruction. Usage: :'<,'>ClaudeImplement <your instruction>"
+      echohl None
+      return
+    endif
 
-  # Prepare the prompt for code implementation
-  var prompt = "<code>\n" .. selected_code .. "\n</code>\n\n"
-  prompt ..= join(g:claude_implement_prompt, "\n")
+    # Get the selected code
+    var selected_code = join(getline(line1, line2), "\n")
+    var bufnr = bufnr('%')
+    var bufname = bufname('%')
+    var winid = win_getid()
 
-  # Query Claude
-  var messages = [{'role': 'user', 'content': instruction}]
-  ClaudeQueryInternal(messages, prompt, [],
-        function(StreamingImplementResponse),
-        function(FinalImplementResponse, [line1, line2, bufnr, bufname, winid, instruction]))
+    # Prepare the prompt for code implementation
+    var prompt = "<code>\n" .. selected_code .. "\n</code>\n\n"
+    prompt ..= join(g:claude_implement_prompt, "\n")
+
+    # Query Claude
+    var messages = [{'role': 'user', 'content': instruction}]
+    ClaudeQueryInternal(messages, prompt, [],
+          function(StreamingImplementResponse),
+          function(FinalImplementResponse, [line1, line2, bufnr, bufname, winid, instruction]))
+  catch
+    echohl ErrorMsg
+    echomsg "FATAL ERROR in ClaudeImplement: " .. v:exception .. " at " .. v:throwpoint
+    echohl None
+  endtry
 enddef
 
 def ExtractCodeFromMarkdown(markdown: string): string
@@ -725,7 +746,7 @@ def SetupClaudeChatSyntax()
 
   # Don't make everything a code block; FIXME this works satisfactorily
   # only for inline markdown pieces
-  syntax clear markdownCodeBlock
+  silent! syntax clear markdownCodeBlock
 
   highlight default link claudeChatSystem Comment
   highlight default link claudeChatSystemKeyword Keyword
