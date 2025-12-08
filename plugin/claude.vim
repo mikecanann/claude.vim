@@ -98,10 +98,12 @@ def ClaudeQueryInternal(messages: list<any>, system_prompt: string, tools: list<
     var data = {}
     var headers: list<any> = []
     var url = ''
+    var cmd: list<any> = []
+    var job: any
 
   if g:claude_use_bedrock
     var python_script = plugin_dir .. '/claude_bedrock_helper.py'
-    var cmd = ['python3', python_script,
+    cmd = ['python3', python_script,
           '--region', g:claude_bedrock_region,
           '--model-id', g:claude_bedrock_model_id,
           '--messages', json_encode(messages),
@@ -134,20 +136,20 @@ def ClaudeQueryInternal(messages: list<any>, system_prompt: string, tools: list<
 
     # Convert data to JSON
     var json_data = json_encode(data)
-    var cmd = ['curl', '-s', '-N', '-X', 'POST']
+    cmd = ['curl', '-s', '-N', '-X', 'POST']
     extend(cmd, headers)
     extend(cmd, ['-d', json_data, url])
   endif
 
     # Start the job
     if has('nvim')
-      var job = jobstart(cmd, {
+      job = jobstart(cmd, {
         on_stdout: function(HandleStreamOutputNvim, [StreamCallback, FinalCallback]),
         on_stderr: function(HandleJobErrorNvim, [StreamCallback, FinalCallback]),
         on_exit: function(HandleJobExitNvim, [StreamCallback, FinalCallback])
         })
     else
-      var job = job_start(cmd, {
+      job = job_start(cmd, {
         out_cb: function(HandleStreamOutput, [StreamCallback, FinalCallback]),
         err_cb: function(HandleJobError, [StreamCallback, FinalCallback]),
         exit_cb: function(HandleJobExit, [StreamCallback, FinalCallback])
@@ -163,13 +165,13 @@ def ClaudeQueryInternal(messages: list<any>, system_prompt: string, tools: list<
   endtry
 enddef
 
-var stored_input_tokens: number
+var stored_input_tokens: number = 0
 
 def DisplayTokenUsageAndCost(json_data: string)
   var data = json_decode(json_data)
   if has_key(data, 'usage')
     var usage = data.usage
-    var input_tokens = exists('stored_input_tokens') ? stored_input_tokens : get(usage, 'input_tokens', 0)
+    var input_tokens = stored_input_tokens > 0 ? stored_input_tokens : get(usage, 'input_tokens', 0)
     var output_tokens = get(usage, 'output_tokens', 0)
 
     var input_cost = (input_tokens / 1000000.0) * 3.0
@@ -177,15 +179,15 @@ def DisplayTokenUsageAndCost(json_data: string)
 
     echom printf("Token usage - Input: %d ($%.4f), Output: %d ($%.4f)", input_tokens, input_cost, output_tokens, output_cost)
 
-    if exists('stored_input_tokens')
-      unlet stored_input_tokens
+    if stored_input_tokens > 0
+      stored_input_tokens = 0
     endif
   else
     echom "Error: Invalid JSON data format"
   endif
 enddef
 
-var current_tool_call: dict<any>
+var current_tool_call: dict<any> = {}
 
 def HandleStreamOutput(StreamCallback: func, FinalCallback: func, channel: any, msg: string)
   # Split the message into lines
@@ -204,15 +206,15 @@ def HandleStreamOutput(StreamCallback: func, FinalCallback: func, channel: any, 
               input: ''
               }
       elseif response.type == 'content_block_delta' && has_key(response.delta, 'type') && response.delta.type == 'input_json_delta'
-        if exists('current_tool_call')
+        if !empty(current_tool_call)
           current_tool_call.input ..= response.delta.partial_json
         endif
       elseif response.type == 'content_block_stop'
-        if exists('current_tool_call')
+        if !empty(current_tool_call)
           var tool_input = json_decode(current_tool_call.input)
           # XXX this is a bit weird layering violation, we should probably call the callback instead
           AppendToolUse(current_tool_call.id, current_tool_call.name, tool_input)
-          unlet current_tool_call
+          current_tool_call = {}
         endif
       elseif has_key(response, 'delta') && has_key(response.delta, 'text')
         var delta = response.delta.text
@@ -487,7 +489,7 @@ enddef
 def ExecuteOpenTool(path: string): string
   var current_winid = win_getid()
 
-  topleft 1new
+  execute 'topleft 1new'
 
   try
     execute 'edit ' .. fnameescape(path)
@@ -515,7 +517,7 @@ def ExecuteNewTool(path: string): string
 
   var current_winid = win_getid()
 
-  topleft 1new
+  execute 'topleft 1new'
   execute 'silent write ' .. fnameescape(path)
   var bufname = bufname('%')
 
@@ -526,7 +528,7 @@ enddef
 def ExecuteOpenWebTool(url: string): string
   var current_winid = win_getid()
 
-  topleft 1new
+  execute 'topleft 1new'
   setlocal buftype=nofile
   setlocal bufhidden=hide
   setlocal noswapfile
@@ -640,7 +642,7 @@ def StreamingImplementResponse(delta: string)
   implement_response ..= delta
 enddef
 
-var current_chat_job: any
+var current_chat_job: any = v:none
 
 def FinalImplementResponse(line1: number, line2: number, bufnr: number, bufname: string, winid: any, instruction: string)
   win_gotoid(winid)
@@ -659,7 +661,7 @@ def FinalImplementResponse(line1: number, line2: number, bufnr: number, bufname:
   echomsg "Apply diff, see :help diffget. Close diff buffer with :q."
 
   unlet implement_response
-  unlet! current_chat_job
+  current_chat_job = v:none
 enddef
 
 
@@ -793,9 +795,8 @@ def OpenClaudeChat()
     augroup END
 
     # Add mappings for this buffer
-    command! -buffer -nargs=1 SendChatMessage call SendChatMessage(<q-args>)
-    execute "inoremap <buffer> " .. g:claude_map_send_chat_message .. " <Esc>:call SendChatMessage('Claude:')<CR>"
-    execute "nnoremap <buffer> " .. g:claude_map_send_chat_message .. " :call SendChatMessage('Claude:')<CR>"
+    execute "inoremap <buffer> " .. g:claude_map_send_chat_message .. " <Esc>:call <SID>SendChatMessage('Claude:')<CR>"
+    execute "nnoremap <buffer> " .. g:claude_map_send_chat_message .. " :call <SID>SendChatMessage('Claude:')<CR>"
   else
     var claude_winid = bufwinid(claude_bufnr)
     if claude_winid == -1
@@ -814,7 +815,7 @@ enddef
 def AddMessageToList(messages: list<any>, message: dict<any>)
   # FIXME: Handle multiple tool_use, tool_result blocks at once
   if !empty(message.role)
-    var msg = {'role': message.role, 'content': join(message.content, "\n")}
+    var msg = {'role': message.role, 'content': trim(join(message.content, "\n"))}
     if !empty(message.tool_use)
       msg['content'] = [{'type': 'text', 'text': msg.content}, message.tool_use]
     endif
@@ -1189,18 +1190,18 @@ def FinalChatResponse()
     CloseCurrentInteractionCodeBlocks()
     PrepareNextInput()
     win_gotoid(current_winid)
-    unlet! current_chat_job
+    current_chat_job = v:none
   endif
 enddef
 
 def CancelClaudeResponse()
-  if exists("current_chat_job")
+  if current_chat_job != v:none
     if has('nvim')
       jobstop(current_chat_job)
     else
       ch_close(current_chat_job)
     endif
-    unlet current_chat_job
+    current_chat_job = v:none
     AppendResponse("[Response cancelled by user]")
     ClosePreviousFold()
     CloseCurrentInteractionCodeBlocks()
