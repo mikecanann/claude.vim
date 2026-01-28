@@ -98,10 +98,11 @@ def ClaudeQueryInternal(messages: list<any>, system_prompt: string, tools: list<
     var data = {}
     var headers: list<any> = []
     var url = ''
+    var cmd: list<string> = []
 
   if g:claude_use_bedrock
     var python_script = plugin_dir .. '/claude_bedrock_helper.py'
-    var cmd = ['python3', python_script,
+    cmd = ['python3', python_script,
           '--region', g:claude_bedrock_region,
           '--model-id', g:claude_bedrock_model_id,
           '--messages', json_encode(messages),
@@ -135,20 +136,21 @@ def ClaudeQueryInternal(messages: list<any>, system_prompt: string, tools: list<
 
     # Convert data to JSON
     var json_data = json_encode(data)
-    var cmd = ['curl', '-s', '-N', '-X', 'POST']
+    cmd = ['curl', '-s', '-N', '-X', 'POST']
     extend(cmd, headers)
     extend(cmd, ['-d', json_data, url])
   endif
 
     # Start the job
+    var job: any
     if has('nvim')
-      var job = jobstart(cmd, {
+      job = jobstart(cmd, {
         on_stdout: function(HandleStreamOutputNvim, [StreamCallback, FinalCallback]),
         on_stderr: function(HandleJobErrorNvim, [StreamCallback, FinalCallback]),
         on_exit: function(HandleJobExitNvim, [StreamCallback, FinalCallback])
         })
     else
-      var job = job_start(cmd, {
+      job = job_start(cmd, {
         out_cb: function(HandleStreamOutput, [StreamCallback, FinalCallback]),
         err_cb: function(HandleJobError, [StreamCallback, FinalCallback]),
         exit_cb: function(HandleJobExit, [StreamCallback, FinalCallback])
