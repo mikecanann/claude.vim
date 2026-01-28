@@ -166,13 +166,13 @@ def ClaudeQueryInternal(messages: list<any>, system_prompt: string, tools: list<
   endtry
 enddef
 
-var stored_input_tokens: number
+var stored_input_tokens: number = -1
 
 def DisplayTokenUsageAndCost(json_data: string)
   var data = json_decode(json_data)
   if has_key(data, 'usage')
     var usage = data.usage
-    var input_tokens = exists('stored_input_tokens') ? stored_input_tokens : get(usage, 'input_tokens', 0)
+    var input_tokens = stored_input_tokens >= 0 ? stored_input_tokens : get(usage, 'input_tokens', 0)
     var output_tokens = get(usage, 'output_tokens', 0)
 
     var input_cost = (input_tokens / 1000000.0) * 3.0
@@ -180,8 +180,8 @@ def DisplayTokenUsageAndCost(json_data: string)
 
     echom printf("Token usage - Input: %d ($%.4f), Output: %d ($%.4f)", input_tokens, input_cost, output_tokens, output_cost)
 
-    if exists('stored_input_tokens')
-      unlet stored_input_tokens
+    if stored_input_tokens >= 0
+      stored_input_tokens = -1
     endif
   else
     echom "Error: Invalid JSON data format"
