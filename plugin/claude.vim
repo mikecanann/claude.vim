@@ -2,13 +2,6 @@ vim9script
 # File: plugin/claude.vim
 # vim: sw=2 ts=2 et
 
-#augroup claude
-#    autocmd!
-#    var plugin_dir = expand('<sfile>:p:h:h')
-#    var cmd = printf('source %s/%s', plugin_dir, 'plugin/claude.vim')
-#    autocmd BufEnter * exec cmd
-#augroup END
-
 # Configuration variables
 if !exists('g:claude_api_key')
   g:claude_api_key = ''
@@ -495,7 +488,7 @@ enddef
 def ExecuteOpenTool(path: string): string
   var current_winid = win_getid()
 
-  :topleft 1new
+  topleft :1new
 
   try
     execute 'edit ' .. fnameescape(path)
@@ -523,7 +516,7 @@ def ExecuteNewTool(path: string): string
 
   var current_winid = win_getid()
 
-  :topleft 1new
+  topleft :1new
   execute 'silent write ' .. fnameescape(path)
   var bufname = bufname('%')
 
@@ -534,7 +527,7 @@ enddef
 def ExecuteOpenWebTool(url: string): string
   var current_winid = win_getid()
 
-  :topleft 1new
+  topleft :1new
   setlocal buftype=nofile
   setlocal bufhidden=hide
   setlocal noswapfile
