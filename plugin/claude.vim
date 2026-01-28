@@ -641,7 +641,7 @@ def StreamingImplementResponse(delta: string)
   implement_response ..= delta
 enddef
 
-var current_chat_job: any
+var current_chat_job: any = null
 
 def FinalImplementResponse(line1: number, line2: number, bufnr: number, bufname: string, winid: any, instruction: string)
   win_gotoid(winid)
@@ -660,7 +660,7 @@ def FinalImplementResponse(line1: number, line2: number, bufnr: number, bufname:
   echomsg "Apply diff, see :help diffget. Close diff buffer with :q."
 
   unlet implement_response
-  unlet! current_chat_job
+  current_chat_job = null
 enddef
 
 
@@ -794,7 +794,7 @@ def OpenClaudeChat()
     augroup END
 
     # Add mappings for this buffer
-    command! -buffer -nargs=1 SendChatMessage <ScriptCmd>SendChatMessage(<q-args>)
+    command! -buffer -nargs=1 SendChatMessage call SendChatMessage(<q-args>)
     execute "inoremap <buffer> " .. g:claude_map_send_chat_message .. " <Esc><ScriptCmd>SendChatMessage('Claude:')<CR>"
     execute "nnoremap <buffer> " .. g:claude_map_send_chat_message .. " <ScriptCmd>SendChatMessage('Claude:')<CR>"
   else
@@ -1190,18 +1190,18 @@ def FinalChatResponse()
     CloseCurrentInteractionCodeBlocks()
     PrepareNextInput()
     win_gotoid(current_winid)
-    unlet! current_chat_job
+    current_chat_job = null
   endif
 enddef
 
 def CancelClaudeResponse()
-  if exists("current_chat_job")
+  if current_chat_job != null
     if has('nvim')
       jobstop(current_chat_job)
     else
       ch_close(current_chat_job)
     endif
-    unlet current_chat_job
+    current_chat_job = null
     AppendResponse("[Response cancelled by user]")
     ClosePreviousFold()
     CloseCurrentInteractionCodeBlocks()
