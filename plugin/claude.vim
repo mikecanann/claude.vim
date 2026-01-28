@@ -131,8 +131,8 @@ def ClaudeQueryInternal(messages: list<any>, system_prompt: string, tools: list<
       endif
       extend(headers, ['-H', 'Content-Type: application/json'])
       extend(headers, ['-H', 'x-api-key: ' .. g:claude_api_key])
-      # extend(headers, ['-H', 'anthropic-version: 2023-06-01'])
-      extend(headers, ['-H', "Authorization: 'Bearer " .. g:claude_api_key .. '"'])
+      extend(headers, ['-H', 'anthropic-version: 2023-06-01'])
+      # extend(headers, ['-H', "Authorization: 'Bearer " .. g:claude_api_key .. '"'])
 
       # Convert data to JSON
       var json_data = json_encode(data)
