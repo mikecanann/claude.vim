@@ -100,46 +100,46 @@ def ClaudeQueryInternal(messages: list<any>, system_prompt: string, tools: list<
     var url = ''
     var cmd: list<string> = []
 
-  if g:claude_use_bedrock
-    var python_script = plugin_dir .. '/claude_bedrock_helper.py'
-    cmd = ['python3', python_script,
-          '--region', g:claude_bedrock_region,
-          '--model-id', g:claude_bedrock_model_id,
-          '--messages', json_encode(messages),
-          '--system-prompt', system_prompt]
+    if g:claude_use_bedrock
+      var python_script = plugin_dir .. '/claude_bedrock_helper.py'
+      cmd = ['python3', python_script,
+            '--region', g:claude_bedrock_region,
+            '--model-id', g:claude_bedrock_model_id,
+            '--messages', json_encode(messages),
+            '--system-prompt', system_prompt]
 
-    if !empty(g:claude_aws_profile)
-      extend(cmd, ['--profile', g:claude_aws_profile])
-    endif
+      if !empty(g:claude_aws_profile)
+        extend(cmd, ['--profile', g:claude_aws_profile])
+      endif
 
-    if !empty(tools)
-      extend(cmd, ['--tools', json_encode(tools)])
-    endif
-  else
-    url = g:claude_api_url
-    data = {
-      model: g:claude_model,
-      max_tokens: 2048,
-      messages: messages,
-      stream: v:true
-      }
-    if !empty(system_prompt)
-      data['system'] = system_prompt
-    endif
-    if !empty(tools)
-      data['tools'] = tools
-    endif
-    extend(headers, ['-H', 'Content-Type: application/json'])
-    extend(headers, ['-H', 'x-api-key: ' .. g:claude_api_key])
-    # extend(headers, ['-H', 'anthropic-version: 2023-06-01'])
-    extend(headers, ['-H', "Authorization: 'Bearer " .. g:claude_api_key .. '"'])
+      if !empty(tools)
+        extend(cmd, ['--tools', json_encode(tools)])
+      endif
+    else
+      url = g:claude_api_url
+      data = {
+        model: g:claude_model,
+        max_tokens: 2048,
+        messages: messages,
+        stream: v:true
+        }
+      if !empty(system_prompt)
+        data['system'] = system_prompt
+      endif
+      if !empty(tools)
+        data['tools'] = tools
+      endif
+      extend(headers, ['-H', 'Content-Type: application/json'])
+      extend(headers, ['-H', 'x-api-key: ' .. g:claude_api_key])
+      # extend(headers, ['-H', 'anthropic-version: 2023-06-01'])
+      extend(headers, ['-H', "Authorization: 'Bearer " .. g:claude_api_key .. '"'])
 
-    # Convert data to JSON
-    var json_data = json_encode(data)
-    cmd = ['curl', '-s', '-N', '-X', 'POST']
-    extend(cmd, headers)
-    extend(cmd, ['-d', json_data, url])
-  endif
+      # Convert data to JSON
+      var json_data = json_encode(data)
+      cmd = ['curl', '-s', '-N', '-X', 'POST']
+      extend(cmd, headers)
+      extend(cmd, ['-d', json_data, url])
+    endif
 
     # Start the job
     var job: any
