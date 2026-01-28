@@ -188,7 +188,7 @@ def DisplayTokenUsageAndCost(json_data: string)
   endif
 enddef
 
-var current_tool_call: dict<any>
+var current_tool_call: dict<any> = {}
 
 def HandleStreamOutput(StreamCallback: func, FinalCallback: func, channel: any, msg: string)
   # Split the message into lines
@@ -207,15 +207,15 @@ def HandleStreamOutput(StreamCallback: func, FinalCallback: func, channel: any, 
               input: ''
               }
       elseif response.type == 'content_block_delta' && has_key(response.delta, 'type') && response.delta.type == 'input_json_delta'
-        if exists('current_tool_call')
+        if !empty(current_tool_call)
           current_tool_call.input ..= response.delta.partial_json
         endif
       elseif response.type == 'content_block_stop'
-        if exists('current_tool_call')
+        if !empty(current_tool_call)
           var tool_input = json_decode(current_tool_call.input)
           # XXX this is a bit weird layering violation, we should probably call the callback instead
           AppendToolUse(current_tool_call.id, current_tool_call.name, tool_input)
-          unlet current_tool_call
+          current_tool_call = {}
         endif
       elseif has_key(response, 'delta') && has_key(response.delta, 'text')
         var delta = response.delta.text
