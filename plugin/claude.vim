@@ -31,6 +31,15 @@ if !exists('g:claude_aws_profile')
   g:claude_aws_profile = ''
 endif
 
+# Pricing per million tokens (set to 0 to disable cost display)
+if !exists('g:claude_input_price_per_million')
+  g:claude_input_price_per_million = 15.0
+endif
+
+if !exists('g:claude_output_price_per_million')
+  g:claude_output_price_per_million = 75.0
+endif
+
 if !exists('g:claude_map_implement')
   g:claude_map_implement = '<leader>ci'
 endif
@@ -132,7 +141,6 @@ def ClaudeQueryInternal(messages: list<any>, system_prompt: string, tools: list<
       extend(headers, ['-H', 'Content-Type: application/json'])
       extend(headers, ['-H', 'x-api-key: ' .. g:claude_api_key])
       extend(headers, ['-H', 'anthropic-version: 2023-06-01'])
-      # extend(headers, ['-H', "Authorization: 'Bearer " .. g:claude_api_key .. '"'])
 
       # Convert data to JSON
       var json_data = json_encode(data)
@@ -169,14 +177,21 @@ enddef
 var stored_input_tokens: number = -1
 
 def DisplayTokenUsageAndCost(json_data: string)
-  var data = json_decode(json_data)
+  var data: any
+  try
+    data = json_decode(json_data)
+  catch
+    echom "Error: Failed to parse token usage JSON: " .. v:exception
+    return
+  endtry
+
   if has_key(data, 'usage')
     var usage = data.usage
     var input_tokens = stored_input_tokens >= 0 ? stored_input_tokens : get(usage, 'input_tokens', 0)
     var output_tokens = get(usage, 'output_tokens', 0)
 
-    var input_cost = (input_tokens / 1000000.0) * 3.0
-    var output_cost = (output_tokens / 1000000.0) * 15.0
+    var input_cost = (input_tokens / 1000000.0) * g:claude_input_price_per_million
+    var output_cost = (output_tokens / 1000000.0) * g:claude_output_price_per_million
 
     echom printf("Token usage - Input: %d ($%.4f), Output: %d ($%.4f)", input_tokens, input_cost, output_tokens, output_cost)
 
@@ -198,7 +213,13 @@ def HandleStreamOutput(StreamCallback: func, FinalCallback: func, channel: any, 
     if line =~# '^data:'
       # Extract the JSON data
       var json_str = substitute(line, '^data:\s*', '', '')
-      var response = json_decode(json_str)
+      var response: any
+      try
+        response = json_decode(json_str)
+      catch
+        StreamCallback('Error: Failed to parse JSON response: ' .. v:exception .. "\n")
+        continue
+      endtry
 
       if response.type == 'content_block_start' && response.content_block.type == 'tool_use'
         current_tool_call = {
@@ -212,8 +233,14 @@ def HandleStreamOutput(StreamCallback: func, FinalCallback: func, channel: any, 
         endif
       elseif response.type == 'content_block_stop'
         if !empty(current_tool_call)
-          var tool_input = json_decode(current_tool_call.input)
-          # XXX this is a bit weird layering violation, we should probably call the callback instead
+          var tool_input: any
+          try
+            tool_input = json_decode(current_tool_call.input)
+          catch
+            StreamCallback('Error: Failed to parse tool input JSON: ' .. v:exception .. "\n")
+            current_tool_call = {}
+            continue
+          endtry
           AppendToolUse(current_tool_call.id, current_tool_call.name, tool_input)
           current_tool_call = {}
         endif
@@ -457,7 +484,13 @@ def ExecuteTool(tool_name: string, arguments: dict<any>): string
   elseif tool_name == 'open_web'
     return ExecuteOpenWebTool(arguments.url)
   elseif tool_name == 'web_search'
-    var escaped_query = py3eval("''.join([c if c.isalnum() or c in '-._~' else '%{:02X}'.format(ord(c)) for c in vim.eval('arguments.query')])")
+    var escaped_query: string
+    if has('python3')
+      escaped_query = py3eval("''.join([c if c.isalnum() or c in '-._~' else '%{:02X}'.format(ord(c)) for c in vim.eval('arguments.query')])")
+    else
+      # Fallback URL encoding without Python3
+      escaped_query = substitute(arguments.query, '[^a-zA-Z0-9\-._~]', '\=printf("%%%02X", char2nr(submatch(0)))', 'g')
+    endif
     return ExecuteOpenWebTool("https://www.google.com/search?q=" .. escaped_query)
   else
     return 'Error: Unknown tool ' .. tool_name
@@ -489,21 +522,20 @@ enddef
 
 def ExecuteOpenTool(path: string): string
   var current_winid = win_getid()
+  var expanded_path = expand(path)
+
+  # Check if path exists before trying to open
+  if !filereadable(expanded_path) && !isdirectory(expanded_path)
+    return 'ERROR: Path does not exist: ' .. path
+  endif
 
   topleft :1new
 
   try
     execute 'edit ' .. fnameescape(path)
     var bufname = bufname('%')
-
-    if line('$') == 1 && getline(1) == ''
-      close
-      win_gotoid(current_winid)
-      return 'ERROR: The opened buffer was empty (non-existent?)'
-    else
-      win_gotoid(current_winid)
-      return bufname
-    endif
+    win_gotoid(current_winid)
+    return bufname
   catch
     close
     win_gotoid(current_winid)
@@ -527,6 +559,11 @@ def ExecuteNewTool(path: string): string
 enddef
 
 def ExecuteOpenWebTool(url: string): string
+  # Check if elinks is available
+  if !executable('elinks')
+    return 'ERROR: elinks is not installed. Install it with: sudo apt install elinks (Debian/Ubuntu), brew install elinks (macOS), or your package manager.'
+  endif
+
   var current_winid = win_getid()
 
   topleft :1new
@@ -538,7 +575,7 @@ def ExecuteOpenWebTool(url: string): string
   if v:shell_error
     close
     win_gotoid(current_winid)
-    return 'ERROR: Failed to fetch content from ' .. url .. ': ' .. v:shell_error
+    return 'ERROR: Failed to fetch content from ' .. url .. ': exit code ' .. v:shell_error
   endif
 
   var bufname = fnameescape(url)
@@ -586,11 +623,14 @@ def LogImplementInChat(instruction: string, implement_response: string, bufname:
   endif
 enddef
 
-var implement_response: string
+var implement_response: string = ''
 
 # Function to implement code based on instructions
 def ClaudeImplement(line1: number, line2: number, instruction: string)
   try
+    # Reset response accumulator
+    implement_response = ''
+
     # Validate instruction is not empty
     if empty(trim(instruction))
       echohl ErrorMsg
@@ -623,7 +663,7 @@ enddef
 
 def ExtractCodeFromMarkdown(markdown: string): string
   var lines = split(markdown, "\n")
-  var in_code_block = 0
+  var in_code_block = false
   var code: list<string> = []
   for line in lines
     if line =~ '^```'
@@ -636,10 +676,6 @@ def ExtractCodeFromMarkdown(markdown: string): string
 enddef
 
 def StreamingImplementResponse(delta: string)
-  if !exists("implement_response")
-    implement_response = ""
-  endif
-
   implement_response ..= delta
 enddef
 
@@ -661,7 +697,7 @@ def FinalImplementResponse(line1: number, line2: number, bufnr: number, bufname:
 
   echomsg "Apply diff, see :help diffget. Close diff buffer with :q."
 
-  unlet implement_response
+  implement_response = ''
   current_chat_job = null
 enddef
 
